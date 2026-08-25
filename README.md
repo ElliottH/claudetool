@@ -73,6 +73,7 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 | `no-inline-file` | PreToolUse | `Bash` | Blocks heredocs and content-building command substitution `$(cat/printf/echo …)`; points at writing the content with a file tool and referencing it (`< file`, `git commit -F`, `gh pr create --body-file`) |
 | `no-command-substitution` | PreToolUse | `Bash` | Blocks command substitution `$(…)`/backticks (arithmetic `$((…))` allowed); points at running the inner command as its own step and using its output explicitly (e.g. `docker ps -q …` then `docker inspect <ids>`) |
 | `no-exit-code-check` | PreToolUse | `Bash` | Blocks `$?` exit-code scaffolding (e.g. `echo "EXIT=$?"`); points at running the command and reading its output |
+| `no-shell-var` | PreToolUse | `Bash` | Blocks assigning a *literal* shell variable then expanding it (e.g. `W=/long/path; grep ... $W/...`) — Claude Code flags the `$W` as `simple_expansion` and prompts; inlining the literal avoids it. Leaves `$(...)`-valued vars, `for` loops, and env-prefix `FOO=bar cmd` alone |
 
 ### Permission-prompt reduction
 

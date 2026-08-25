@@ -192,7 +192,7 @@ func TestValuableCommentsPromptCarriesRubricAndCode(t *testing.T) {
 	}
 }
 
-func TestValuableCommentsEditUsesNewStringOnly(t *testing.T) {
+func TestValuableCommentsPrecheckGatesOnNewText(t *testing.T) {
 	a, rec := newReview(t, "PASS")
 	_, _ = invoke(t, a, "Edit", EditInput{
 		FilePath:  "/src/x.go",
@@ -200,7 +200,41 @@ func TestValuableCommentsEditUsesNewStringOnly(t *testing.T) {
 		NewString: "y()",
 	})
 	if rec.called {
-		t.Error("reviewer should see only NewString; OldString comment must not trigger it")
+		t.Error("precheck gates on new text; a comment only in OldString must not dispatch")
+	}
+}
+
+func TestValuableCommentsEditPromptCarriesBeforeAndAfter(t *testing.T) {
+	a, rec := newReview(t, "PASS")
+	_, _ = invoke(t, a, "Edit", EditInput{
+		FilePath:  "/src/x.go",
+		OldString: "// pre-existing comment\nx()",
+		NewString: "// pre-existing comment\n// newly added note\nx()",
+	})
+	if !rec.called {
+		t.Fatal("reviewer should be called when the new text has a comment")
+	}
+	for _, want := range []string{"BEFORE", "AFTER", "pre-existing comment", "newly added note"} {
+		if !strings.Contains(rec.prompt, want) {
+			t.Errorf("edit prompt should contain %q", want)
+		}
+	}
+}
+
+func TestValuableCommentsWritePromptHasNoDiffFraming(t *testing.T) {
+	a, rec := newReview(t, "PASS")
+	_, _ = invoke(t, a, "Write", WriteInput{
+		FilePath: "/src/x.go",
+		Content:  "// note\nx()",
+	})
+	if !rec.called {
+		t.Fatal("reviewer should be called when the content has a comment")
+	}
+	if strings.Contains(rec.prompt, "--- BEFORE ---") {
+		t.Error("a Write has no before text; prompt should use the single-snippet form")
+	}
+	if !strings.Contains(rec.prompt, "BEGIN CHANGED CODE") {
+		t.Error("Write prompt should use the single-snippet framing")
 	}
 }
 

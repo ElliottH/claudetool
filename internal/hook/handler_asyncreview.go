@@ -126,7 +126,7 @@ func (a asyncReview) handler() Handler {
 			return nil, nil
 		}
 
-		filePath, text := changedContent(in)
+		filePath, oldText, newText := changedContent(in)
 		if filePath == "" {
 			return nil, nil
 		}
@@ -136,7 +136,10 @@ func (a asyncReview) handler() Handler {
 		if a.skipSuffix != "" && strings.HasSuffix(filePath, a.skipSuffix) {
 			return nil, nil
 		}
-		if a.precheck != nil && !a.precheck(text) {
+		// Gate on the new text only: if the change introduces nothing the
+		// precheck cares about, there is nothing new to review even when the
+		// surrounding old code would have matched.
+		if a.precheck != nil && !a.precheck(newText) {
 			return nil, nil
 		}
 
@@ -149,7 +152,7 @@ func (a asyncReview) handler() Handler {
 
 		logAsync(a.name, "DISPATCH", filePath)
 
-		out, err := review(buildReviewPrompt(a.rubric, filePath, text), tier.model())
+		out, err := review(buildReviewPrompt(a.rubric, filePath, oldText, newText), tier.model())
 		if err != nil {
 			// Reviewer unavailable (claude not on PATH, not logged in, timeout,
 			// etc.). We still never wake the agent on an infrastructure failure,
@@ -188,36 +191,38 @@ func matchesSuffix(filePath string, suffixes []string) bool {
 	return false
 }
 
-// changedContent extracts the file path and the newly written/edited text from
-// a Write, Edit, or MultiEdit tool input.
-func changedContent(in *Input) (filePath, text string) {
+// changedContent extracts the file path and the before/after text from a Write,
+// Edit, or MultiEdit tool input.
+func changedContent(in *Input) (filePath, oldText, newText string) {
 	switch in.ToolName {
 	case "Write":
 		var w WriteInput
 		if err := json.Unmarshal(in.ToolInput, &w); err != nil {
-			return "", ""
+			return "", "", ""
 		}
-		return w.FilePath, w.Content
+		// A Write overwrites the whole file: no meaningful "before".
+		return w.FilePath, "", w.Content
 	case "Edit":
 		var e EditInput
 		if err := json.Unmarshal(in.ToolInput, &e); err != nil {
-			return "", ""
+			return "", "", ""
 		}
-		return e.FilePath, e.NewString
+		return e.FilePath, e.OldString, e.NewString
 	case "MultiEdit":
 		var m MultiEditInput
 		if err := json.Unmarshal(in.ToolInput, &m); err != nil {
-			return "", ""
+			return "", "", ""
 		}
-		// Join every edit's new text so the reviewer sees all the changes at once.
-		var b strings.Builder
+		var before, after strings.Builder
 		for _, e := range m.Edits {
-			b.WriteString(e.NewString)
-			b.WriteString("\n")
+			before.WriteString(e.OldString)
+			before.WriteString("\n")
+			after.WriteString(e.NewString)
+			after.WriteString("\n")
 		}
-		return m.FilePath, b.String()
+		return m.FilePath, before.String(), after.String()
 	}
-	return "", ""
+	return "", "", ""
 }
 
 // parseVerdict reads the reviewer's protocol output. The first non-empty line
@@ -249,24 +254,47 @@ func parseVerdict(out string) (verdict, feedback string) {
 // Subject-agnostic so each check can scope it through its own rubric.
 const reviewerSystemPrompt = `You are a code reviewer. You are given a rubric and a snippet of newly written or edited code. Judge the snippet ONLY against the rubric — ignore anything the rubric does not ask about. Follow the output protocol exactly: no preamble, no markdown fences, nothing else.`
 
-// buildReviewPrompt assembles the prompt piped to `claude -p` on stdin.
-func buildReviewPrompt(rubric, filePath, text string) string {
-	return fmt.Sprintf(`%s
-
-OUTPUT PROTOCOL
+// buildReviewPrompt assembles the prompt piped to `claude -p` on stdin, using
+// oldText to scope the review to the edit's diff when present.
+func buildReviewPrompt(rubric, filePath, oldText, newText string) string {
+	protocol := `OUTPUT PROTOCOL
 If the changed code below is fine by the rubric above, respond with exactly:
 PASS
 
 Otherwise respond with:
 REVISE
 - <one short bullet per issue: what is wrong -> what to do>
-(nothing after the list)
+(nothing after the list)`
+
+	if oldText == "" {
+		return fmt.Sprintf(`%s
+
+%s
 
 FILE: %s
 --- BEGIN CHANGED CODE ---
 %s
 --- END CHANGED CODE ---
-`, rubric, filePath, text)
+`, rubric, protocol, filePath, newText)
+	}
+
+	return fmt.Sprintf(`%s
+
+%s
+
+SCOPE
+Below are two versions of the code: BEFORE the edit and AFTER. Judge ONLY what
+the edit newly introduced or changed. Anything present in BEFORE and carried
+through to AFTER unchanged is out of scope — do not flag it, even if it would
+fail the rubric on its own.
+
+FILE: %s
+--- BEFORE ---
+%s
+--- AFTER ---
+%s
+--- END ---
+`, rubric, protocol, filePath, oldText, newText)
 }
 
 // runClaudeReview dispatches the prompt to a headless `claude` instance.

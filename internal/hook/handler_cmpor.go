@@ -22,7 +22,7 @@ var reEmptyReturn = regexp.MustCompile(`^\s*return\s+""\s*$`)
 //
 // Use as a PostToolUse hook with matcher "Write|Edit".
 func handleCmpOr(in *Input) (*Output, error) {
-	filePath, text := changedContent(in)
+	filePath, _, text := changedContent(in)
 	if !strings.HasSuffix(filePath, ".go") {
 		return nil, nil
 	}

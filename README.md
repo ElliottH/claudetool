@@ -50,6 +50,7 @@ ones like `dump -o <path>` keep working. Handler names cannot begin with `-`.
 |---|---|---|---|
 | `no-cd` | PreToolUse | `Bash` | Blocks `cd` commands |
 | `no-git-c` | PreToolUse | `Bash` | Blocks `git -C <path>`; tells the agent to run plain `git ...` since the command already runs in the working directory (no `-C`, no `cd` needed) |
+| `no-redundant-git-c` | PreToolUse | `Bash` | Blocks `git -C <dir>` only when the shell is already in `<dir>` — the `-C` is a no-op that only triggers an approval prompt. Leaves `git -C` against a *different* directory alone. Enable this **or** `no-git-c`, not both: `no-git-c` blocks all `-C` (its superset makes this handler unreachable) |
 | `use-ripgrep` | PreToolUse | `Bash` | Blocks `grep`/`egrep`/`fgrep`; points at `rg`, which recurses and respects `.gitignore` by default |
 | `use-linear-mcp` | PreToolUse | `Bash\|WebFetch` | Blocks gh/curl/wget/`linear-cli` calls and WebFetch to `linear.app`, points to MCP |
 | `no-shared-pr-body` | PreToolUse | `Bash` | Blocks commands touching the fixed `/tmp/pr-body.md` path — concurrent agents clobber each other's PR body; points to `mktemp` / `--body-file -` |
